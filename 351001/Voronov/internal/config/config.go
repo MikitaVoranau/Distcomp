@@ -7,6 +7,7 @@ import (
 )
 
 type Config struct {
+	HTTPport string `env:"HTTPPORT"`
 	Postgres postgres.Config
 }
 
