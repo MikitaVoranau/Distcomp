@@ -4,6 +4,7 @@ import "time"
 
 type IssueResponseTo struct {
 	ID       int64             `json:"id"`
+	UserID   int64             `json:"userId"`
 	User     UserResponseTo    `json:"user"`
 	Title    string            `json:"title"`
 	Content  string            `json:"content"`

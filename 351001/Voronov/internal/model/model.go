@@ -15,6 +15,11 @@ type Label struct {
 	Name string `json:"name"`
 }
 
+type IssueLabel struct {
+	IssueID int64 `json:"issueId"`
+	LabelID int64 `json:"labelId"`
+}
+
 type Issue struct {
 	ID       int64     `json:"id"`
 	UserID   int64     `json:"userId"`
@@ -22,6 +27,8 @@ type Issue struct {
 	Content  string    `json:"content"`
 	Created  time.Time `json:"created"`
 	Modified time.Time `json:"modified"`
+	Labels   []*Label  `json:"labels"`
+	User     *User     `json:"user,omitempty"`
 }
 
 type Reaction struct {
