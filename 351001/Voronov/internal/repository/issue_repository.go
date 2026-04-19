@@ -1,11 +1,12 @@
 package repository
 
 import (
+	"context"
+	"errors"
+	"fmt"
+
 	apperrors "Voronov/internal/errors"
 	"Voronov/internal/model"
-	"context"
-	std_errors "errors"
-	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,7 +25,7 @@ func (r *pgIssueRepository) FindByID(ctx context.Context, id int64) (*model.Issu
 	query := "SELECT id, user_id, title, content, created, modified FROM distcomp.tbl_issue WHERE id = $1"
 	var i model.Issue
 	err := r.pool.QueryRow(ctx, query, id).Scan(&i.ID, &i.UserID, &i.Title, &i.Content, &i.Created, &i.Modified)
-	if std_errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, apperrors.ErrNotFound
 	}
 	if err != nil {
@@ -43,17 +44,7 @@ func (r *pgIssueRepository) FindAll(ctx context.Context, opts *QueryOptions) ([]
 		return nil, 0, err
 	}
 
-	orderField := "id"
-	orderDir := "ASC"
-	if opts.Sort != nil {
-		if opts.Sort.Field != "" {
-			orderField = opts.Sort.Field
-		}
-		if opts.Sort.Direction == "DESC" {
-			orderDir = "DESC"
-		}
-	}
-
+	orderField, orderDir := sortParams(opts.Sort)
 	offset := (opts.Pagination.Page - 1) * opts.Pagination.PageSize
 	query := fmt.Sprintf(
 		"SELECT id, user_id, title, content, created, modified FROM distcomp.tbl_issue ORDER BY %s %s LIMIT $1 OFFSET $2",
@@ -66,16 +57,13 @@ func (r *pgIssueRepository) FindAll(ctx context.Context, opts *QueryOptions) ([]
 	}
 	defer rows.Close()
 
-	var items []*model.Issue
+	items := make([]*model.Issue, 0)
 	for rows.Next() {
 		var i model.Issue
 		if err := rows.Scan(&i.ID, &i.UserID, &i.Title, &i.Content, &i.Created, &i.Modified); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, &i)
-	}
-	if items == nil {
-		items = []*model.Issue{}
 	}
 	return items, total, nil
 }
@@ -84,23 +72,13 @@ func (r *pgIssueRepository) Create(ctx context.Context, issue *model.Issue) (*mo
 	query := "INSERT INTO distcomp.tbl_issue (user_id, title, content, created, modified) VALUES ($1, $2, $3, $4, $5) RETURNING id"
 	var id int64
 	err := r.pool.QueryRow(ctx, query, issue.UserID, issue.Title, issue.Content, issue.Created, issue.Modified).Scan(&id)
-
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if std_errors.As(err, &pgErr) {
-			// ЛОГ ДЛЯ ТЕБЯ:
-			fmt.Printf("⚠️ [DB ERROR] Код: %s, Сообщение: %s\n", pgErr.Code, pgErr.Message)
-
-			if pgErr.Code == "23503" { // Нарушение Foreign Key (юзер удален)
-				return nil, apperrors.ErrDuplicate // Вернет 403
-			}
-			if pgErr.Code == "23505" { // Дубликат (если есть)
-				return nil, apperrors.ErrDuplicate
-			}
+		if errors.As(err, &pgErr) && (pgErr.Code == "23505" || pgErr.Code == "23503") {
+			return nil, apperrors.ErrDuplicate
 		}
 		return nil, apperrors.FromDBError(err)
 	}
-
 	issue.ID = id
 	return issue, nil
 }
@@ -110,7 +88,7 @@ func (r *pgIssueRepository) Update(ctx context.Context, id int64, issue *model.I
 	result, err := r.pool.Exec(ctx, query, issue.UserID, issue.Title, issue.Content, issue.Modified, id)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if std_errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		if errors.As(err, &pgErr) && (pgErr.Code == "23505" || pgErr.Code == "23503") {
 			return nil, apperrors.ErrDuplicate
 		}
 		return nil, apperrors.FromDBError(err)
@@ -140,16 +118,13 @@ func (r *pgIssueRepository) FindByUserID(ctx context.Context, userID int64) ([]*
 	}
 	defer rows.Close()
 
-	var items []*model.Issue
+	items := make([]*model.Issue, 0)
 	for rows.Next() {
 		var i model.Issue
 		if err := rows.Scan(&i.ID, &i.UserID, &i.Title, &i.Content, &i.Created, &i.Modified); err != nil {
 			return nil, err
 		}
 		items = append(items, &i)
-	}
-	if items == nil {
-		items = []*model.Issue{}
 	}
 	return items, nil
 }

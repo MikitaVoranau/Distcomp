@@ -1,26 +1,25 @@
 package handler
 
 import (
-	"Voronov/internal/errors"
-	"Voronov/internal/transport/dto/request"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+
+	apperrors "Voronov/internal/errors"
+	"Voronov/internal/transport/dto/request"
 )
 
 func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request, path string) {
-	// Убираем лишние слэши в конце для стабильности
 	path = strings.TrimSuffix(path, "/")
 
 	if strings.HasPrefix(path, "/api/v1.0/users/") {
 		idStr := strings.TrimPrefix(path, "/api/v1.0/users/")
-		// Если после ID нет больше сегментов пути
 		if !strings.Contains(idStr, "/") {
 			id, err := strconv.ParseInt(idStr, 10, 64)
 			if err != nil {
-				h.writeError(w, errors.ErrBadRequest)
+				h.writeError(w, apperrors.ErrBadRequest)
 				return
 			}
 			switch r.Method {
@@ -31,7 +30,7 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request, path strin
 			case http.MethodDelete:
 				h.deleteUser(w, r, id)
 			default:
-				h.writeError(w, errors.ErrNotFound)
+				h.writeError(w, apperrors.ErrNotFound)
 			}
 			return
 		}
@@ -44,14 +43,14 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request, path strin
 		case http.MethodPost:
 			h.createUser(w, r)
 		default:
-			h.writeError(w, errors.ErrNotFound)
+			h.writeError(w, apperrors.ErrNotFound)
 		}
 		return
 	}
-	h.writeError(w, errors.ErrNotFound)
+
+	h.writeError(w, apperrors.ErrNotFound)
 }
 
-// GET /api/v1.0/users/{id}
 func (h *Handler) getUser(w http.ResponseWriter, r *http.Request, id int64) {
 	user, err := h.userService.FindByID(r.Context(), id)
 	if err != nil {
@@ -61,7 +60,6 @@ func (h *Handler) getUser(w http.ResponseWriter, r *http.Request, id int64) {
 	h.writeJSON(w, http.StatusOK, user)
 }
 
-// GET /api/v1.0/users
 func (h *Handler) getUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.userService.FindAll(r.Context())
 	if err != nil {
@@ -71,16 +69,15 @@ func (h *Handler) getUsers(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, users)
 }
 
-// POST /api/v1.0/users
 func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	var req request.UserRequestTo
 	if err := json.Unmarshal(body, &req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	user, err := h.userService.Create(r.Context(), &req)
@@ -91,16 +88,15 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusCreated, user)
 }
 
-// PUT /api/v1.0/users/{id}
 func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request, id int64) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	var req request.UserRequestTo
 	if err := json.Unmarshal(body, &req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	user, err := h.userService.Update(r.Context(), id, &req)
@@ -111,7 +107,6 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request, id int64) {
 	h.writeJSON(w, http.StatusOK, user)
 }
 
-// DELETE /api/v1.0/users/{id}
 func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := h.userService.Delete(r.Context(), id); err != nil {
 		h.writeError(w, err)

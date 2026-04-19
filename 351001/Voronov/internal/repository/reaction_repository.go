@@ -1,11 +1,12 @@
 package repository
 
 import (
-	apperrors "Voronov/internal/errors"
-	"Voronov/internal/model"
 	"context"
 	"errors"
 	"fmt"
+
+	apperrors "Voronov/internal/errors"
+	"Voronov/internal/model"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -25,7 +26,7 @@ func (r *pgReactionRepository) FindByID(ctx context.Context, id int64) (*model.R
 	err := r.pool.QueryRow(ctx,
 		"SELECT id, issue_id, content FROM distcomp.tbl_reaction WHERE id = $1", id,
 	).Scan(&rx.ID, &rx.IssueID, &rx.Content)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, apperrors.ErrNotFound
 	}
 	if err != nil {
@@ -44,17 +45,7 @@ func (r *pgReactionRepository) FindAll(ctx context.Context, opts *QueryOptions) 
 		return nil, 0, err
 	}
 
-	orderField := "id"
-	orderDir := "ASC"
-	if opts.Sort != nil {
-		if opts.Sort.Field != "" {
-			orderField = opts.Sort.Field
-		}
-		if opts.Sort.Direction == "DESC" {
-			orderDir = "DESC"
-		}
-	}
-
+	orderField, orderDir := sortParams(opts.Sort)
 	offset := (opts.Pagination.Page - 1) * opts.Pagination.PageSize
 	query := fmt.Sprintf(
 		"SELECT id, issue_id, content FROM distcomp.tbl_reaction ORDER BY %s %s LIMIT $1 OFFSET $2",
@@ -67,16 +58,13 @@ func (r *pgReactionRepository) FindAll(ctx context.Context, opts *QueryOptions) 
 	}
 	defer rows.Close()
 
-	var items []*model.Reaction
+	items := make([]*model.Reaction, 0)
 	for rows.Next() {
 		var rx model.Reaction
 		if err := rows.Scan(&rx.ID, &rx.IssueID, &rx.Content); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, &rx)
-	}
-	if items == nil {
-		items = []*model.Reaction{}
 	}
 	return items, total, nil
 }
@@ -119,7 +107,7 @@ func (r *pgReactionRepository) Update(ctx context.Context, id int64, reaction *m
 func (r *pgReactionRepository) Delete(ctx context.Context, id int64) error {
 	result, err := r.pool.Exec(ctx, "DELETE FROM distcomp.tbl_reaction WHERE id = $1", id)
 	if err != nil {
-		return err
+		return apperrors.FromDBError(err)
 	}
 	if result.RowsAffected() == 0 {
 		return apperrors.ErrNotFound
@@ -136,16 +124,13 @@ func (r *pgReactionRepository) FindByIssueID(ctx context.Context, issueID int64)
 	}
 	defer rows.Close()
 
-	var items []*model.Reaction
+	items := make([]*model.Reaction, 0)
 	for rows.Next() {
 		var rx model.Reaction
 		if err := rows.Scan(&rx.ID, &rx.IssueID, &rx.Content); err != nil {
 			return nil, err
 		}
 		items = append(items, &rx)
-	}
-	if items == nil {
-		items = []*model.Reaction{}
 	}
 	return items, nil
 }

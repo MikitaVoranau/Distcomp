@@ -1,16 +1,15 @@
 package service
 
 import (
+	"context"
+	"time"
+
 	"Voronov/internal/errors"
 	"Voronov/internal/model"
 	"Voronov/internal/repository"
 	"Voronov/internal/transport/dto/request"
 	"Voronov/internal/transport/dto/response"
-	"context"
-	"time"
 )
-
-// --- UserService ---
 
 type userServiceImpl struct {
 	repo   repository.UserRepository
@@ -76,7 +75,7 @@ func (s *userServiceImpl) Update(ctx context.Context, id int64, req *request.Use
 	}
 	updated, err := s.repo.Update(ctx, id, s.mapper.ToUserModel(req))
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
 	return s.mapper.ToUserResponse(updated), nil
 }
@@ -84,8 +83,6 @@ func (s *userServiceImpl) Update(ctx context.Context, id int64, req *request.Use
 func (s *userServiceImpl) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
-
-// --- IssueService ---
 
 type issueServiceImpl struct {
 	issueRepo    repository.IssueRepository
@@ -150,30 +147,18 @@ func (s *issueServiceImpl) Create(ctx context.Context, req *request.IssueRequest
 	if _, err := s.userRepo.FindByID(ctx, req.UserID); err != nil {
 		return nil, errors.ErrBadRequest
 	}
+
 	issue := s.mapper.ToIssueModel(req)
 	issue.Created = time.Now().UTC()
 	issue.Modified = time.Now().UTC()
+
 	created, err := s.issueRepo.Create(ctx, issue)
 	if err != nil {
 		return nil, errors.FromDBError(err)
 	}
-	// Create and attach labels
-	for _, labelName := range req.Labels {
-		if len(labelName) < 2 || len(labelName) > 32 {
-			continue
-		}
-		label, err := s.labelRepo.Create(ctx, &model.Label{Name: labelName})
-		if err != nil {
-			// label may already exist — try to find it
-			existing, findErr := s.labelRepo.FindByName(ctx, labelName)
-			if findErr != nil {
-				continue
-			}
-			label = existing
-		}
-		_ = s.labelRepo.AddLabelToIssue(ctx, created.ID, label.ID)
-		created.Labels = append(created.Labels, label)
-	}
+
+	s.attachLabels(ctx, created, req.Labels)
+
 	if user, err := s.userRepo.FindByID(ctx, created.UserID); err == nil {
 		created.User = user
 	}
@@ -190,30 +175,19 @@ func (s *issueServiceImpl) Update(ctx context.Context, id int64, req *request.Is
 	if len(req.Content) < 4 || len(req.Content) > 2048 {
 		return nil, errors.ErrBadRequest
 	}
+
 	issue := s.mapper.ToIssueModel(req)
 	issue.Modified = time.Now().UTC()
+
 	updated, err := s.issueRepo.Update(ctx, id, issue)
 	if err != nil {
 		return nil, errors.FromDBError(err)
 	}
-	// Re-attach labels if provided
+
 	if len(req.Labels) > 0 {
-		for _, labelName := range req.Labels {
-			if len(labelName) < 2 || len(labelName) > 32 {
-				continue
-			}
-			label, err := s.labelRepo.Create(ctx, &model.Label{Name: labelName})
-			if err != nil {
-				existing, findErr := s.labelRepo.FindByName(ctx, labelName)
-				if findErr != nil {
-					continue
-				}
-				label = existing
-			}
-			_ = s.labelRepo.AddLabelToIssue(ctx, updated.ID, label.ID)
-			updated.Labels = append(updated.Labels, label)
-		}
+		s.attachLabels(ctx, updated, req.Labels)
 	}
+
 	if user, err := s.userRepo.FindByID(ctx, updated.UserID); err == nil {
 		updated.User = user
 	}
@@ -221,14 +195,12 @@ func (s *issueServiceImpl) Update(ctx context.Context, id int64, req *request.Is
 }
 
 func (s *issueServiceImpl) Delete(ctx context.Context, id int64) error {
-	// Find labels attached to this issue before deleting
 	labels, _ := s.labelRepo.FindByIssueID(ctx, id)
 
 	if err := s.issueRepo.Delete(ctx, id); err != nil {
 		return err
 	}
 
-	// Delete orphan labels (labels not attached to any other issue)
 	for _, label := range labels {
 		others, _ := s.labelRepo.FindIssuesByLabelID(ctx, label.ID)
 		if len(others) == 0 {
@@ -254,6 +226,7 @@ func (s *issueServiceImpl) FindByIssueID(ctx context.Context, issueID int64) ([]
 	if _, err := s.issueRepo.FindByID(ctx, issueID); err != nil {
 		return nil, nil, err
 	}
+
 	labels, err := s.labelRepo.FindByIssueID(ctx, issueID)
 	if err != nil {
 		return nil, nil, err
@@ -262,6 +235,7 @@ func (s *issueServiceImpl) FindByIssueID(ctx context.Context, issueID int64) ([]
 	for _, l := range labels {
 		labelResults = append(labelResults, s.mapper.ToLabelResponse(l))
 	}
+
 	reactions, err := s.reactionRepo.FindByIssueID(ctx, issueID)
 	if err != nil {
 		return nil, nil, err
@@ -270,6 +244,7 @@ func (s *issueServiceImpl) FindByIssueID(ctx context.Context, issueID int64) ([]
 	for _, r := range reactions {
 		reactionResults = append(reactionResults, s.mapper.ToReactionResponse(r))
 	}
+
 	return labelResults, reactionResults, nil
 }
 
@@ -278,6 +253,7 @@ func (s *issueServiceImpl) SearchIssues(ctx context.Context, labelNames []string
 	if err != nil {
 		return nil, err
 	}
+
 	results := make([]*response.IssueResponseTo, 0)
 	for _, issue := range issues {
 		if title != "" && issue.Title != title {
@@ -300,7 +276,23 @@ func (s *issueServiceImpl) SearchIssues(ctx context.Context, labelNames []string
 	return results, nil
 }
 
-// --- LabelService ---
+func (s *issueServiceImpl) attachLabels(ctx context.Context, issue *model.Issue, names []string) {
+	for _, name := range names {
+		if len(name) < 2 || len(name) > 32 {
+			continue
+		}
+		label, err := s.labelRepo.Create(ctx, &model.Label{Name: name})
+		if err != nil {
+			existing, findErr := s.labelRepo.FindByName(ctx, name)
+			if findErr != nil {
+				continue
+			}
+			label = existing
+		}
+		_ = s.labelRepo.AddLabelToIssue(ctx, issue.ID, label.ID)
+		issue.Labels = append(issue.Labels, label)
+	}
+}
 
 type labelServiceImpl struct {
 	repo   repository.LabelRepository
@@ -356,8 +348,6 @@ func (s *labelServiceImpl) Update(ctx context.Context, id int64, req *request.La
 func (s *labelServiceImpl) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
-
-// --- ReactionService ---
 
 type reactionServiceImpl struct {
 	repo      repository.ReactionRepository

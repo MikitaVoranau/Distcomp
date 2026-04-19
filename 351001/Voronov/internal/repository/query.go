@@ -51,3 +51,17 @@ func WithSort(field, direction string) func(*QueryOptions) {
 		o.Sort = &Sort{Field: field, Direction: direction}
 	}
 }
+
+func sortParams(s *Sort) (field, dir string) {
+	field, dir = "id", "ASC"
+	if s == nil {
+		return
+	}
+	if s.Field != "" {
+		field = s.Field
+	}
+	if s.Direction == "DESC" {
+		dir = "DESC"
+	}
+	return
+}

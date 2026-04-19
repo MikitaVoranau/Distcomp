@@ -1,12 +1,13 @@
 package handler
 
 import (
-	"Voronov/internal/errors"
-	"Voronov/internal/transport/dto/request"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+
+	apperrors "Voronov/internal/errors"
+	"Voronov/internal/transport/dto/request"
 )
 
 func (h *Handler) handleLabels(w http.ResponseWriter, r *http.Request, path string) {
@@ -17,7 +18,7 @@ func (h *Handler) handleLabels(w http.ResponseWriter, r *http.Request, path stri
 		if !strings.Contains(idStr, "/") {
 			id, err := strconv.ParseInt(idStr, 10, 64)
 			if err != nil {
-				h.writeError(w, errors.ErrBadRequest)
+				h.writeError(w, apperrors.ErrBadRequest)
 				return
 			}
 			switch r.Method {
@@ -28,7 +29,7 @@ func (h *Handler) handleLabels(w http.ResponseWriter, r *http.Request, path stri
 			case http.MethodDelete:
 				h.deleteLabel(w, r, id)
 			default:
-				h.writeError(w, errors.ErrNotFound)
+				h.writeError(w, apperrors.ErrNotFound)
 			}
 			return
 		}
@@ -41,12 +42,12 @@ func (h *Handler) handleLabels(w http.ResponseWriter, r *http.Request, path stri
 		case http.MethodPost:
 			h.createLabel(w, r)
 		default:
-			h.writeError(w, errors.ErrNotFound)
+			h.writeError(w, apperrors.ErrNotFound)
 		}
 		return
 	}
 
-	h.writeError(w, errors.ErrNotFound)
+	h.writeError(w, apperrors.ErrNotFound)
 }
 
 func (h *Handler) getLabel(w http.ResponseWriter, r *http.Request, id int64) {
@@ -70,7 +71,7 @@ func (h *Handler) getLabels(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createLabel(w http.ResponseWriter, r *http.Request) {
 	var req request.LabelRequestTo
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	label, err := h.labelService.Create(r.Context(), &req)
@@ -84,7 +85,7 @@ func (h *Handler) createLabel(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateLabel(w http.ResponseWriter, r *http.Request, id int64) {
 	var req request.LabelRequestTo
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	label, err := h.labelService.Update(r.Context(), id, &req)

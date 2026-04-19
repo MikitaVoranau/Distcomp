@@ -1,11 +1,12 @@
 package repository
 
 import (
-	apperrors "Voronov/internal/errors"
-	"Voronov/internal/model"
 	"context"
 	"errors"
 	"fmt"
+
+	apperrors "Voronov/internal/errors"
+	"Voronov/internal/model"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,7 +24,7 @@ func NewLabelRepository(pool *pgxpool.Pool) LabelRepository {
 func (r *pgLabelRepository) FindByID(ctx context.Context, id int64) (*model.Label, error) {
 	var l model.Label
 	err := r.pool.QueryRow(ctx, "SELECT id, name FROM distcomp.tbl_label WHERE id = $1", id).Scan(&l.ID, &l.Name)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, apperrors.ErrNotFound
 	}
 	if err != nil {
@@ -35,7 +36,7 @@ func (r *pgLabelRepository) FindByID(ctx context.Context, id int64) (*model.Labe
 func (r *pgLabelRepository) FindByName(ctx context.Context, name string) (*model.Label, error) {
 	var l model.Label
 	err := r.pool.QueryRow(ctx, "SELECT id, name FROM distcomp.tbl_label WHERE name = $1", name).Scan(&l.ID, &l.Name)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, apperrors.ErrNotFound
 	}
 	if err != nil {
@@ -54,17 +55,7 @@ func (r *pgLabelRepository) FindAll(ctx context.Context, opts *QueryOptions) ([]
 		return nil, 0, err
 	}
 
-	orderField := "id"
-	orderDir := "ASC"
-	if opts.Sort != nil {
-		if opts.Sort.Field != "" {
-			orderField = opts.Sort.Field
-		}
-		if opts.Sort.Direction == "DESC" {
-			orderDir = "DESC"
-		}
-	}
-
+	orderField, orderDir := sortParams(opts.Sort)
 	offset := (opts.Pagination.Page - 1) * opts.Pagination.PageSize
 	query := fmt.Sprintf(
 		"SELECT id, name FROM distcomp.tbl_label ORDER BY %s %s LIMIT $1 OFFSET $2",
@@ -77,16 +68,13 @@ func (r *pgLabelRepository) FindAll(ctx context.Context, opts *QueryOptions) ([]
 	}
 	defer rows.Close()
 
-	var items []*model.Label
+	items := make([]*model.Label, 0)
 	for rows.Next() {
 		var l model.Label
 		if err := rows.Scan(&l.ID, &l.Name); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, &l)
-	}
-	if items == nil {
-		items = []*model.Label{}
 	}
 	return items, total, nil
 }
@@ -123,7 +111,7 @@ func (r *pgLabelRepository) Update(ctx context.Context, id int64, label *model.L
 func (r *pgLabelRepository) Delete(ctx context.Context, id int64) error {
 	result, err := r.pool.Exec(ctx, "DELETE FROM distcomp.tbl_label WHERE id = $1", id)
 	if err != nil {
-		return err
+		return apperrors.FromDBError(err)
 	}
 	if result.RowsAffected() == 0 {
 		return apperrors.ErrNotFound
@@ -133,24 +121,21 @@ func (r *pgLabelRepository) Delete(ctx context.Context, id int64) error {
 
 func (r *pgLabelRepository) FindByIssueID(ctx context.Context, issueID int64) ([]*model.Label, error) {
 	query := `SELECT l.id, l.name FROM distcomp.tbl_label l
-	          JOIN distcomp.tbl_issue_label il ON l.id = il.label_id
-	          WHERE il.issue_id = $1`
+		JOIN distcomp.tbl_issue_label il ON l.id = il.label_id
+		WHERE il.issue_id = $1`
 	rows, err := r.pool.Query(ctx, query, issueID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var items []*model.Label
+	items := make([]*model.Label, 0)
 	for rows.Next() {
 		var l model.Label
 		if err := rows.Scan(&l.ID, &l.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, &l)
-	}
-	if items == nil {
-		items = []*model.Label{}
 	}
 	return items, nil
 }

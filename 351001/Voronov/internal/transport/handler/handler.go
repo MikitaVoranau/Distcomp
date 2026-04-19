@@ -1,13 +1,13 @@
 package handler
 
 import (
-	"Voronov/internal/errors"
-	"Voronov/internal/service"
 	"encoding/json"
-	std_errors "errors"
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
+
+	apperrors "Voronov/internal/errors"
+	"Voronov/internal/service"
 )
 
 type Handler struct {
@@ -32,13 +32,11 @@ func NewHandler(
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	api := "/api/v1.0"
-	mux.HandleFunc(api+"/", h.handleAll)
+	mux.HandleFunc("/api/v1.0/", h.handleAll)
 }
 
 func (h *Handler) handleAll(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-
 	switch {
 	case strings.HasPrefix(path, "/api/v1.0/users"):
 		h.handleUsers(w, r, path)
@@ -49,7 +47,7 @@ func (h *Handler) handleAll(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v1.0/reactions"):
 		h.handleReactions(w, r, path)
 	default:
-		h.writeError(w, errors.ErrNotFound)
+		h.writeError(w, apperrors.ErrNotFound)
 	}
 }
 
@@ -60,26 +58,14 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, data interface{})
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, err error) {
-	// 1. Выводим ошибку в консоль сервера, чтобы не работать вслепую
-	fmt.Println("❌ ОШИБКА НА СЕРВЕРЕ:", err.Error())
-
-	var appErr *errors.AppError
-
-	// 2. ИСПОЛЬЗУЕМ errors.As ВМЕСТО ПРЯМОГО ПРИВЕДЕНИЯ ТИПОВ
-	// Это спасет, если слой service оборачивает ошибку через fmt.Errorf
-	if std_errors.As(err, &appErr) {
+	var appErr *apperrors.AppError
+	if errors.As(err, &appErr) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(appErr.HTTPStatus)
 		json.NewEncoder(w).Encode(appErr)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
-
-	// 3. Возвращаем текст ошибки прямо в тест, если это не AppError
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"errorCode":    50001,
-		"errorMessage": "Unknown Error: " + err.Error(),
-	})
+	json.NewEncoder(w).Encode(apperrors.ErrInternal)
 }

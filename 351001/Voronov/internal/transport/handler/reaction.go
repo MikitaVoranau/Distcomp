@@ -1,12 +1,13 @@
 package handler
 
 import (
-	"Voronov/internal/errors"
-	"Voronov/internal/transport/dto/request"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+
+	apperrors "Voronov/internal/errors"
+	"Voronov/internal/transport/dto/request"
 )
 
 func (h *Handler) handleReactions(w http.ResponseWriter, r *http.Request, path string) {
@@ -17,7 +18,7 @@ func (h *Handler) handleReactions(w http.ResponseWriter, r *http.Request, path s
 		if !strings.Contains(idStr, "/") {
 			id, err := strconv.ParseInt(idStr, 10, 64)
 			if err != nil {
-				h.writeError(w, errors.ErrBadRequest)
+				h.writeError(w, apperrors.ErrBadRequest)
 				return
 			}
 			switch r.Method {
@@ -28,7 +29,7 @@ func (h *Handler) handleReactions(w http.ResponseWriter, r *http.Request, path s
 			case http.MethodDelete:
 				h.deleteReaction(w, r, id)
 			default:
-				h.writeError(w, errors.ErrNotFound)
+				h.writeError(w, apperrors.ErrNotFound)
 			}
 			return
 		}
@@ -41,12 +42,12 @@ func (h *Handler) handleReactions(w http.ResponseWriter, r *http.Request, path s
 		case http.MethodPost:
 			h.createReaction(w, r)
 		default:
-			h.writeError(w, errors.ErrNotFound)
+			h.writeError(w, apperrors.ErrNotFound)
 		}
 		return
 	}
 
-	h.writeError(w, errors.ErrNotFound)
+	h.writeError(w, apperrors.ErrNotFound)
 }
 
 func (h *Handler) getReaction(w http.ResponseWriter, r *http.Request, id int64) {
@@ -70,7 +71,7 @@ func (h *Handler) getReactions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createReaction(w http.ResponseWriter, r *http.Request) {
 	var req request.ReactionRequestTo
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	reaction, err := h.reactionService.Create(r.Context(), &req)
@@ -84,7 +85,7 @@ func (h *Handler) createReaction(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateReaction(w http.ResponseWriter, r *http.Request, id int64) {
 	var req request.ReactionRequestTo
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	reaction, err := h.reactionService.Update(r.Context(), id, &req)

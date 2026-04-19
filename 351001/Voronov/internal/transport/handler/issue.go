@@ -1,31 +1,29 @@
 package handler
 
 import (
-	"Voronov/internal/errors"
-	"Voronov/internal/transport/dto/request"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+
+	apperrors "Voronov/internal/errors"
+	"Voronov/internal/transport/dto/request"
 )
 
 func (h *Handler) handleIssues(w http.ResponseWriter, r *http.Request, path string) {
-	// Нормализуем путь: убираем слэш в конце, если он есть
 	path = strings.TrimSuffix(path, "/")
 
-	// Обработка /api/v1.0/issues/{id}/...
 	if strings.HasPrefix(path, "/api/v1.0/issues/") {
 		idStr := strings.TrimPrefix(path, "/api/v1.0/issues/")
+		parts := strings.SplitN(idStr, "/", 2)
 
-		// Проверяем, есть ли подресурсы (user, labels, reactions)
-		parts := strings.Split(idStr, "/")
 		id, err := strconv.ParseInt(parts[0], 10, 64)
 		if err != nil {
-			h.writeError(w, errors.ErrBadRequest)
+			h.writeError(w, apperrors.ErrBadRequest)
 			return
 		}
 
-		if len(parts) > 1 {
+		if len(parts) == 2 {
 			switch parts[1] {
 			case "user":
 				h.getUserByIssue(w, r, id)
@@ -34,12 +32,11 @@ func (h *Handler) handleIssues(w http.ResponseWriter, r *http.Request, path stri
 			case "reactions":
 				h.getReactionsByIssue(w, r, id)
 			default:
-				h.writeError(w, errors.ErrNotFound)
+				h.writeError(w, apperrors.ErrNotFound)
 			}
 			return
 		}
 
-		// Если это просто /api/v1.0/issues/{id}
 		switch r.Method {
 		case http.MethodGet:
 			h.getIssue(w, r, id)
@@ -48,12 +45,11 @@ func (h *Handler) handleIssues(w http.ResponseWriter, r *http.Request, path stri
 		case http.MethodDelete:
 			h.deleteIssue(w, r, id)
 		default:
-			h.writeError(w, errors.ErrNotFound)
+			h.writeError(w, apperrors.ErrNotFound)
 		}
 		return
 	}
 
-	// Обработка коллекции /api/v1.0/issues
 	if path == "/api/v1.0/issues" {
 		switch r.Method {
 		case http.MethodGet:
@@ -61,12 +57,12 @@ func (h *Handler) handleIssues(w http.ResponseWriter, r *http.Request, path stri
 		case http.MethodPost:
 			h.createIssue(w, r)
 		default:
-			h.writeError(w, errors.ErrNotFound)
+			h.writeError(w, apperrors.ErrNotFound)
 		}
 		return
 	}
 
-	h.writeError(w, errors.ErrNotFound)
+	h.writeError(w, apperrors.ErrNotFound)
 }
 
 func (h *Handler) getIssue(w http.ResponseWriter, r *http.Request, id int64) {
@@ -90,7 +86,7 @@ func (h *Handler) getIssues(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 	var req request.IssueRequestTo
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	issue, err := h.issueService.Create(r.Context(), &req)
@@ -104,7 +100,7 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateIssue(w http.ResponseWriter, r *http.Request, id int64) {
 	var req request.IssueRequestTo
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, errors.ErrBadRequest)
+		h.writeError(w, apperrors.ErrBadRequest)
 		return
 	}
 	issue, err := h.issueService.Update(r.Context(), id, &req)
