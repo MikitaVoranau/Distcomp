@@ -6,28 +6,31 @@ import (
 	"Voronov/internal/repository"
 	"Voronov/internal/transport/dto/request"
 	"Voronov/internal/transport/dto/response"
+	"context"
 	"time"
 )
 
-type UserServiceImpl struct {
-	repo   repository.CRUDRepository[model.User]
+// --- UserService ---
+
+type userServiceImpl struct {
+	repo   repository.UserRepository
 	mapper Mapper
 }
 
-func NewUserService(repo repository.CRUDRepository[model.User], mapper Mapper) UserService {
-	return &UserServiceImpl{repo: repo, mapper: mapper}
+func NewUserService(repo repository.UserRepository, mapper Mapper) UserService {
+	return &userServiceImpl{repo: repo, mapper: mapper}
 }
 
-func (s *UserServiceImpl) FindByID(id int64) (*response.UserResponseTo, error) {
-	user, err := s.repo.FindByID(id)
+func (s *userServiceImpl) FindByID(ctx context.Context, id int64) (*response.UserResponseTo, error) {
+	user, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	return s.mapper.ToUserResponse(user), nil
 }
 
-func (s *UserServiceImpl) FindAll() ([]*response.UserResponseTo, error) {
-	users, err := s.repo.FindAll()
+func (s *userServiceImpl) FindAll(ctx context.Context) ([]*response.UserResponseTo, error) {
+	users, _, err := s.repo.FindAll(ctx, repository.NewQueryOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -38,81 +41,95 @@ func (s *UserServiceImpl) FindAll() ([]*response.UserResponseTo, error) {
 	return result, nil
 }
 
-func (s *UserServiceImpl) Create(req *request.UserRequestTo) (*response.UserResponseTo, error) {
-	if req.Login == "" || req.Password == "" || req.Firstname == "" || req.Lastname == "" {
+func (s *userServiceImpl) Create(ctx context.Context, req *request.UserRequestTo) (*response.UserResponseTo, error) {
+	if len(req.Login) < 2 || len(req.Login) > 64 {
 		return nil, errors.ErrBadRequest
 	}
-	user := s.mapper.ToUserModel(req)
-	created, err := s.repo.Create(user)
+	if len(req.Password) < 8 || len(req.Password) > 128 {
+		return nil, errors.ErrBadRequest
+	}
+	if len(req.Firstname) < 2 || len(req.Firstname) > 64 {
+		return nil, errors.ErrBadRequest
+	}
+	if len(req.Lastname) < 2 || len(req.Lastname) > 64 {
+		return nil, errors.ErrBadRequest
+	}
+	created, err := s.repo.Create(ctx, s.mapper.ToUserModel(req))
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
 	return s.mapper.ToUserResponse(created), nil
 }
 
-func (s *UserServiceImpl) Update(id int64, req *request.UserRequestTo) (*response.UserResponseTo, error) {
-	if req.Login == "" || req.Password == "" || req.Firstname == "" || req.Lastname == "" {
+func (s *userServiceImpl) Update(ctx context.Context, id int64, req *request.UserRequestTo) (*response.UserResponseTo, error) {
+	if len(req.Login) < 2 || len(req.Login) > 64 {
 		return nil, errors.ErrBadRequest
 	}
-	user := s.mapper.ToUserModel(req)
-	user.ID = id
-	updated, err := s.repo.Update(id, user)
+	if len(req.Password) < 8 || len(req.Password) > 128 {
+		return nil, errors.ErrBadRequest
+	}
+	if len(req.Firstname) < 2 || len(req.Firstname) > 64 {
+		return nil, errors.ErrBadRequest
+	}
+	if len(req.Lastname) < 2 || len(req.Lastname) > 64 {
+		return nil, errors.ErrBadRequest
+	}
+	updated, err := s.repo.Update(ctx, id, s.mapper.ToUserModel(req))
 	if err != nil {
 		return nil, err
 	}
 	return s.mapper.ToUserResponse(updated), nil
 }
 
-func (s *UserServiceImpl) Delete(id int64) error {
-	return s.repo.Delete(id)
+func (s *userServiceImpl) Delete(ctx context.Context, id int64) error {
+	return s.repo.Delete(ctx, id)
 }
 
-type IssueServiceImpl struct {
-	issueRepo      repository.CRUDRepository[model.Issue]
-	userRepo       repository.CRUDRepository[model.User]
-	labelRepo      repository.CRUDRepository[model.Label]
-	reactionRepo   repository.CRUDRepository[model.Reaction]
-	issueLabelRepo repository.CRUDRepository[model.IssueLabel]
-	mapper         Mapper
+// --- IssueService ---
+
+type issueServiceImpl struct {
+	issueRepo    repository.IssueRepository
+	userRepo     repository.UserRepository
+	labelRepo    repository.LabelRepository
+	reactionRepo repository.ReactionRepository
+	mapper       Mapper
 }
 
 func NewIssueService(
-	issueRepo repository.CRUDRepository[model.Issue],
-	userRepo repository.CRUDRepository[model.User],
-	labelRepo repository.CRUDRepository[model.Label],
-	reactionRepo repository.CRUDRepository[model.Reaction],
-	issueLabelRepo repository.CRUDRepository[model.IssueLabel],
+	issueRepo repository.IssueRepository,
+	userRepo repository.UserRepository,
+	labelRepo repository.LabelRepository,
+	reactionRepo repository.ReactionRepository,
 	mapper Mapper,
 ) IssueService {
-	return &IssueServiceImpl{
-		issueRepo:      issueRepo,
-		userRepo:       userRepo,
-		labelRepo:      labelRepo,
-		reactionRepo:   reactionRepo,
-		issueLabelRepo: issueLabelRepo,
-		mapper:         mapper,
+	return &issueServiceImpl{
+		issueRepo:    issueRepo,
+		userRepo:     userRepo,
+		labelRepo:    labelRepo,
+		reactionRepo: reactionRepo,
+		mapper:       mapper,
 	}
 }
 
-func (s *IssueServiceImpl) FindByID(id int64) (*response.IssueResponseTo, error) {
-	issue, err := s.issueRepo.FindByID(id)
+func (s *issueServiceImpl) FindByID(ctx context.Context, id int64) (*response.IssueResponseTo, error) {
+	issue, err := s.issueRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if user, err := s.userRepo.FindByID(issue.UserID); err == nil {
+	if user, err := s.userRepo.FindByID(ctx, issue.UserID); err == nil {
 		issue.User = user
 	}
 	return s.mapper.ToIssueResponse(issue), nil
 }
 
-func (s *IssueServiceImpl) FindAll() ([]*response.IssueResponseTo, error) {
-	issues, err := s.issueRepo.FindAll()
+func (s *issueServiceImpl) FindAll(ctx context.Context) ([]*response.IssueResponseTo, error) {
+	issues, _, err := s.issueRepo.FindAll(ctx, repository.NewQueryOptions())
 	if err != nil {
 		return nil, err
 	}
 	result := make([]*response.IssueResponseTo, 0, len(issues))
 	for _, i := range issues {
-		if user, err := s.userRepo.FindByID(i.UserID); err == nil {
+		if user, err := s.userRepo.FindByID(ctx, i.UserID); err == nil {
 			i.User = user
 		}
 		result = append(result, s.mapper.ToIssueResponse(i))
@@ -120,82 +137,144 @@ func (s *IssueServiceImpl) FindAll() ([]*response.IssueResponseTo, error) {
 	return result, nil
 }
 
-func (s *IssueServiceImpl) Create(req *request.IssueRequestTo) (*response.IssueResponseTo, error) {
-	if req.UserID == 0 || req.Title == "" || req.Content == "" {
+func (s *issueServiceImpl) Create(ctx context.Context, req *request.IssueRequestTo) (*response.IssueResponseTo, error) {
+	if req.UserID == 0 {
 		return nil, errors.ErrBadRequest
 	}
-	if _, err := s.userRepo.FindByID(req.UserID); err != nil {
+	if len(req.Title) < 2 || len(req.Title) > 64 {
+		return nil, errors.ErrBadRequest
+	}
+	if len(req.Content) < 4 || len(req.Content) > 2048 {
+		return nil, errors.ErrBadRequest
+	}
+	if _, err := s.userRepo.FindByID(ctx, req.UserID); err != nil {
 		return nil, errors.ErrBadRequest
 	}
 	issue := s.mapper.ToIssueModel(req)
-	issue.Created = time.Now()
-	issue.Modified = time.Now()
-	created, err := s.issueRepo.Create(issue)
+	issue.Created = time.Now().UTC()
+	issue.Modified = time.Now().UTC()
+	created, err := s.issueRepo.Create(ctx, issue)
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
-	if user, err := s.userRepo.FindByID(created.UserID); err == nil {
+	// Create and attach labels
+	for _, labelName := range req.Labels {
+		if len(labelName) < 2 || len(labelName) > 32 {
+			continue
+		}
+		label, err := s.labelRepo.Create(ctx, &model.Label{Name: labelName})
+		if err != nil {
+			// label may already exist — try to find it
+			existing, findErr := s.labelRepo.FindByName(ctx, labelName)
+			if findErr != nil {
+				continue
+			}
+			label = existing
+		}
+		_ = s.labelRepo.AddLabelToIssue(ctx, created.ID, label.ID)
+		created.Labels = append(created.Labels, label)
+	}
+	if user, err := s.userRepo.FindByID(ctx, created.UserID); err == nil {
 		created.User = user
 	}
 	return s.mapper.ToIssueResponse(created), nil
 }
 
-func (s *IssueServiceImpl) Update(id int64, req *request.IssueRequestTo) (*response.IssueResponseTo, error) {
-	if req.UserID == 0 || req.Title == "" || req.Content == "" {
+func (s *issueServiceImpl) Update(ctx context.Context, id int64, req *request.IssueRequestTo) (*response.IssueResponseTo, error) {
+	if req.UserID == 0 {
+		return nil, errors.ErrBadRequest
+	}
+	if len(req.Title) < 2 || len(req.Title) > 64 {
+		return nil, errors.ErrBadRequest
+	}
+	if len(req.Content) < 4 || len(req.Content) > 2048 {
 		return nil, errors.ErrBadRequest
 	}
 	issue := s.mapper.ToIssueModel(req)
-	issue.ID = id
-	issue.Modified = time.Now()
-	updated, err := s.issueRepo.Update(id, issue)
+	issue.Modified = time.Now().UTC()
+	updated, err := s.issueRepo.Update(ctx, id, issue)
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
-	if user, err := s.userRepo.FindByID(updated.UserID); err == nil {
+	// Re-attach labels if provided
+	if len(req.Labels) > 0 {
+		for _, labelName := range req.Labels {
+			if len(labelName) < 2 || len(labelName) > 32 {
+				continue
+			}
+			label, err := s.labelRepo.Create(ctx, &model.Label{Name: labelName})
+			if err != nil {
+				existing, findErr := s.labelRepo.FindByName(ctx, labelName)
+				if findErr != nil {
+					continue
+				}
+				label = existing
+			}
+			_ = s.labelRepo.AddLabelToIssue(ctx, updated.ID, label.ID)
+			updated.Labels = append(updated.Labels, label)
+		}
+	}
+	if user, err := s.userRepo.FindByID(ctx, updated.UserID); err == nil {
 		updated.User = user
 	}
 	return s.mapper.ToIssueResponse(updated), nil
 }
 
-func (s *IssueServiceImpl) Delete(id int64) error {
-	return s.issueRepo.Delete(id)
+func (s *issueServiceImpl) Delete(ctx context.Context, id int64) error {
+	// Find labels attached to this issue before deleting
+	labels, _ := s.labelRepo.FindByIssueID(ctx, id)
+
+	if err := s.issueRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+
+	// Delete orphan labels (labels not attached to any other issue)
+	for _, label := range labels {
+		others, _ := s.labelRepo.FindIssuesByLabelID(ctx, label.ID)
+		if len(others) == 0 {
+			_ = s.labelRepo.Delete(ctx, label.ID)
+		}
+	}
+	return nil
 }
 
-func (s *IssueServiceImpl) FindByUserID(userID int64) (*response.UserResponseTo, error) {
-	user, err := s.userRepo.FindByID(userID)
+func (s *issueServiceImpl) FindByUserID(ctx context.Context, issueID int64) (*response.UserResponseTo, error) {
+	issue, err := s.issueRepo.FindByID(ctx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	user, err := s.userRepo.FindByID(ctx, issue.UserID)
 	if err != nil {
 		return nil, err
 	}
 	return s.mapper.ToUserResponse(user), nil
 }
 
-func (s *IssueServiceImpl) FindByIssueID(issueID int64) ([]*response.LabelResponseTo, []*response.ReactionResponseTo, error) {
-	if _, err := s.issueRepo.FindByID(issueID); err != nil {
+func (s *issueServiceImpl) FindByIssueID(ctx context.Context, issueID int64) ([]*response.LabelResponseTo, []*response.ReactionResponseTo, error) {
+	if _, err := s.issueRepo.FindByID(ctx, issueID); err != nil {
 		return nil, nil, err
 	}
-	labels, err := s.labelRepo.FindAll()
+	labels, err := s.labelRepo.FindByIssueID(ctx, issueID)
 	if err != nil {
 		return nil, nil, err
 	}
-	labelResults := make([]*response.LabelResponseTo, 0)
+	labelResults := make([]*response.LabelResponseTo, 0, len(labels))
 	for _, l := range labels {
 		labelResults = append(labelResults, s.mapper.ToLabelResponse(l))
 	}
-	reactions, err := s.reactionRepo.FindAll()
+	reactions, err := s.reactionRepo.FindByIssueID(ctx, issueID)
 	if err != nil {
 		return nil, nil, err
 	}
-	reactionResults := make([]*response.ReactionResponseTo, 0)
+	reactionResults := make([]*response.ReactionResponseTo, 0, len(reactions))
 	for _, r := range reactions {
-		if r.IssueID == issueID {
-			reactionResults = append(reactionResults, s.mapper.ToReactionResponse(r))
-		}
+		reactionResults = append(reactionResults, s.mapper.ToReactionResponse(r))
 	}
 	return labelResults, reactionResults, nil
 }
 
-func (s *IssueServiceImpl) SearchIssues(labelNames []string, labelIDs []int64, userLogin, title, content string) ([]*response.IssueResponseTo, error) {
-	issues, err := s.issueRepo.FindAll()
+func (s *issueServiceImpl) SearchIssues(ctx context.Context, labelNames []string, labelIDs []int64, userLogin, title, content string) ([]*response.IssueResponseTo, error) {
+	issues, _, err := s.issueRepo.FindAll(ctx, repository.NewQueryOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -208,12 +287,12 @@ func (s *IssueServiceImpl) SearchIssues(labelNames []string, labelIDs []int64, u
 			continue
 		}
 		if userLogin != "" {
-			user, err := s.userRepo.FindByID(issue.UserID)
+			user, err := s.userRepo.FindByID(ctx, issue.UserID)
 			if err != nil || user.Login != userLogin {
 				continue
 			}
 		}
-		if user, err := s.userRepo.FindByID(issue.UserID); err == nil {
+		if user, err := s.userRepo.FindByID(ctx, issue.UserID); err == nil {
 			issue.User = user
 		}
 		results = append(results, s.mapper.ToIssueResponse(issue))
@@ -221,25 +300,27 @@ func (s *IssueServiceImpl) SearchIssues(labelNames []string, labelIDs []int64, u
 	return results, nil
 }
 
-type LabelServiceImpl struct {
-	repo   repository.CRUDRepository[model.Label]
+// --- LabelService ---
+
+type labelServiceImpl struct {
+	repo   repository.LabelRepository
 	mapper Mapper
 }
 
-func NewLabelService(repo repository.CRUDRepository[model.Label], mapper Mapper) LabelService {
-	return &LabelServiceImpl{repo: repo, mapper: mapper}
+func NewLabelService(repo repository.LabelRepository, mapper Mapper) LabelService {
+	return &labelServiceImpl{repo: repo, mapper: mapper}
 }
 
-func (s *LabelServiceImpl) FindByID(id int64) (*response.LabelResponseTo, error) {
-	label, err := s.repo.FindByID(id)
+func (s *labelServiceImpl) FindByID(ctx context.Context, id int64) (*response.LabelResponseTo, error) {
+	label, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	return s.mapper.ToLabelResponse(label), nil
 }
 
-func (s *LabelServiceImpl) FindAll() ([]*response.LabelResponseTo, error) {
-	labels, err := s.repo.FindAll()
+func (s *labelServiceImpl) FindAll(ctx context.Context) ([]*response.LabelResponseTo, error) {
+	labels, _, err := s.repo.FindAll(ctx, repository.NewQueryOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -250,54 +331,54 @@ func (s *LabelServiceImpl) FindAll() ([]*response.LabelResponseTo, error) {
 	return result, nil
 }
 
-func (s *LabelServiceImpl) Create(req *request.LabelRequestTo) (*response.LabelResponseTo, error) {
-	if req.Name == "" {
+func (s *labelServiceImpl) Create(ctx context.Context, req *request.LabelRequestTo) (*response.LabelResponseTo, error) {
+	if len(req.Name) < 2 || len(req.Name) > 32 {
 		return nil, errors.ErrBadRequest
 	}
-	label := s.mapper.ToLabelModel(req)
-	created, err := s.repo.Create(label)
+	created, err := s.repo.Create(ctx, s.mapper.ToLabelModel(req))
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
 	return s.mapper.ToLabelResponse(created), nil
 }
 
-func (s *LabelServiceImpl) Update(id int64, req *request.LabelRequestTo) (*response.LabelResponseTo, error) {
-	if req.Name == "" {
+func (s *labelServiceImpl) Update(ctx context.Context, id int64, req *request.LabelRequestTo) (*response.LabelResponseTo, error) {
+	if len(req.Name) < 2 || len(req.Name) > 32 {
 		return nil, errors.ErrBadRequest
 	}
-	label := s.mapper.ToLabelModel(req)
-	label.ID = id
-	updated, err := s.repo.Update(id, label)
+	updated, err := s.repo.Update(ctx, id, s.mapper.ToLabelModel(req))
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
 	return s.mapper.ToLabelResponse(updated), nil
 }
 
-func (s *LabelServiceImpl) Delete(id int64) error {
-	return s.repo.Delete(id)
+func (s *labelServiceImpl) Delete(ctx context.Context, id int64) error {
+	return s.repo.Delete(ctx, id)
 }
 
-type ReactionServiceImpl struct {
-	repo   repository.CRUDRepository[model.Reaction]
-	mapper Mapper
+// --- ReactionService ---
+
+type reactionServiceImpl struct {
+	repo      repository.ReactionRepository
+	issueRepo repository.IssueRepository
+	mapper    Mapper
 }
 
-func NewReactionService(repo repository.CRUDRepository[model.Reaction], mapper Mapper) ReactionService {
-	return &ReactionServiceImpl{repo: repo, mapper: mapper}
+func NewReactionService(repo repository.ReactionRepository, issueRepo repository.IssueRepository, mapper Mapper) ReactionService {
+	return &reactionServiceImpl{repo: repo, issueRepo: issueRepo, mapper: mapper}
 }
 
-func (s *ReactionServiceImpl) FindByID(id int64) (*response.ReactionResponseTo, error) {
-	reaction, err := s.repo.FindByID(id)
+func (s *reactionServiceImpl) FindByID(ctx context.Context, id int64) (*response.ReactionResponseTo, error) {
+	reaction, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	return s.mapper.ToReactionResponse(reaction), nil
 }
 
-func (s *ReactionServiceImpl) FindAll() ([]*response.ReactionResponseTo, error) {
-	reactions, err := s.repo.FindAll()
+func (s *reactionServiceImpl) FindAll(ctx context.Context) ([]*response.ReactionResponseTo, error) {
+	reactions, _, err := s.repo.FindAll(ctx, repository.NewQueryOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -308,31 +389,37 @@ func (s *ReactionServiceImpl) FindAll() ([]*response.ReactionResponseTo, error) 
 	return result, nil
 }
 
-func (s *ReactionServiceImpl) Create(req *request.ReactionRequestTo) (*response.ReactionResponseTo, error) {
-	if req.IssueID == 0 || req.Content == "" {
+func (s *reactionServiceImpl) Create(ctx context.Context, req *request.ReactionRequestTo) (*response.ReactionResponseTo, error) {
+	if req.IssueID == 0 {
 		return nil, errors.ErrBadRequest
 	}
-	reaction := s.mapper.ToReactionModel(req)
-	created, err := s.repo.Create(reaction)
+	if len(req.Content) < 2 || len(req.Content) > 2048 {
+		return nil, errors.ErrBadRequest
+	}
+	if _, err := s.issueRepo.FindByID(ctx, req.IssueID); err != nil {
+		return nil, errors.ErrBadRequest
+	}
+	created, err := s.repo.Create(ctx, s.mapper.ToReactionModel(req))
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
 	return s.mapper.ToReactionResponse(created), nil
 }
 
-func (s *ReactionServiceImpl) Update(id int64, req *request.ReactionRequestTo) (*response.ReactionResponseTo, error) {
-	if req.IssueID == 0 || req.Content == "" {
+func (s *reactionServiceImpl) Update(ctx context.Context, id int64, req *request.ReactionRequestTo) (*response.ReactionResponseTo, error) {
+	if req.IssueID == 0 {
 		return nil, errors.ErrBadRequest
 	}
-	reaction := s.mapper.ToReactionModel(req)
-	reaction.ID = id
-	updated, err := s.repo.Update(id, reaction)
+	if len(req.Content) < 2 || len(req.Content) > 2048 {
+		return nil, errors.ErrBadRequest
+	}
+	updated, err := s.repo.Update(ctx, id, s.mapper.ToReactionModel(req))
 	if err != nil {
-		return nil, err
+		return nil, errors.FromDBError(err)
 	}
 	return s.mapper.ToReactionResponse(updated), nil
 }
 
-func (s *ReactionServiceImpl) Delete(id int64) error {
-	return s.repo.Delete(id)
+func (s *reactionServiceImpl) Delete(ctx context.Context, id int64) error {
+	return s.repo.Delete(ctx, id)
 }

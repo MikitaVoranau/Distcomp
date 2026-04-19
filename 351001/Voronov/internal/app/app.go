@@ -2,62 +2,96 @@ package app
 
 import (
 	"Voronov/internal/config"
-	"Voronov/internal/model"
 	"Voronov/internal/repository"
 	"Voronov/internal/service"
 	"Voronov/internal/transport/handler"
+	"Voronov/pkg/postgres"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"net/http"
 	"time"
+
+	_ "github.com/lib/pq"
+	"github.com/pressly/goose/v3"
+	"go.uber.org/zap"
 )
 
 func Run(ctx context.Context, logger *zap.Logger) error {
 	cfg, err := config.New()
 	if err != nil {
-		logger.Fatal("load config: %w", zap.Error(err))
+		return fmt.Errorf("load config: %w", err)
 	}
-
 	if err := cfg.Validate(); err != nil {
-		logger.Fatal("validate config: %w", zap.Error(err))
+		return fmt.Errorf("validate config: %w", err)
 	}
 
-	userRepo := repository.NewInMemoryRepository(
-		func(u *model.User) int64 { return u.ID },
-		func(u *model.User, id int64) { u.ID = id },
-	)
-	issueRepo := repository.NewInMemoryRepository(
-		func(i *model.Issue) int64 { return i.ID },
-		func(i *model.Issue, id int64) { i.ID = id },
-	)
-	labelRepo := repository.NewInMemoryRepository(
-		func(l *model.Label) int64 { return l.ID },
-		func(l *model.Label, id int64) { l.ID = id },
-	)
-	reactionRepo := repository.NewInMemoryRepository(
-		func(r *model.Reaction) int64 { return r.ID },
-		func(r *model.Reaction, id int64) { r.ID = id },
-	)
-	issueLabelRepo := repository.NewInMemoryRepository(
-		func(il *model.IssueLabel) int64 { return il.IssueID*1000 + il.LabelID },
-		func(il *model.IssueLabel, id int64) { il.IssueID = id / 1000; il.LabelID = id % 1000 },
-	)
+	// Run migrations via database/sql (goose requirement)
+	db, err := sql.Open("postgres", cfg.GooseDBString)
+	if err != nil {
+		return fmt.Errorf("open db for migrations: %w", err)
+	}
+	// Закроем это соединение, когда миграции отработают
+	defer db.Close()
 
+	// 2. Проверяем, что база доступна
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping db: %w", err)
+	}
+
+	// 3. САМОЕ ВАЖНОЕ: Создаем схему ПЕРЕД настройкой goose
+	_, err = db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS distcomp;")
+	if err != nil {
+		return fmt.Errorf("create schema distcomp: %w", err)
+	}
+
+	// 4. Настраиваем goose (явно указываем схему для служебной таблицы)
+	goose.SetTableName("distcomp.schema_migrations")
+	if err := goose.SetDialect("postgres"); err != nil {
+		return fmt.Errorf("set goose dialect: %w", err)
+	}
+
+	// 5. Запускаем миграции (убедись, что папка migrations лежит рядом с main.go или укажи правильный путь)
+	if err := goose.Up(db, "migrations"); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+	logger.Info("migrations applied successfully")
+
+	// Create pgxpool for repositories
+	pool, err := postgres.NewPool(ctx, &postgres.Config{
+		Host:     cfg.PostgresHost,
+		Port:     cfg.PostgresPort,
+		Username: cfg.PostgresUser,
+		Password: cfg.PostgresPass,
+		Database: cfg.PostgresDB,
+	})
+	if err != nil {
+		return fmt.Errorf("create pool: %w", err)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		return fmt.Errorf("ping pool: %w", err)
+	}
+
+	// Wire repositories
+	userRepo := repository.NewUserRepository(pool)
+	issueRepo := repository.NewIssueRepository(pool)
+	labelRepo := repository.NewLabelRepository(pool)
+	reactionRepo := repository.NewReactionRepository(pool)
+
+	// Wire services
 	mapper := service.NewMapper()
-
 	userService := service.NewUserService(userRepo, mapper)
-	issueService := service.NewIssueService(issueRepo, userRepo, labelRepo, reactionRepo, issueLabelRepo, mapper)
+	issueService := service.NewIssueService(issueRepo, userRepo, labelRepo, reactionRepo, mapper)
 	labelService := service.NewLabelService(labelRepo, mapper)
-	reactionService := service.NewReactionService(reactionRepo, mapper)
+	reactionService := service.NewReactionService(reactionRepo, issueRepo, mapper)
 
+	// Wire handler
 	h := handler.NewHandler(userService, issueService, labelService, reactionService)
-
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
-
-	logger.Info("starting server", zap.String("host", "localhost"), zap.String("port", cfg.HTTPport))
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.HTTPport),
@@ -65,24 +99,22 @@ func Run(ctx context.Context, logger *zap.Logger) error {
 	}
 
 	go func() {
-		logger.Info("server listening", zap.String("port", cfg.HTTPport))
+		logger.Info("server listening", zap.String("addr", server.Addr))
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatal("listen and serve failed", zap.Error(err))
 		}
 	}()
 
 	<-ctx.Done()
-
 	logger.Info("shutting down server...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err = server.Shutdown(shutdownCtx); err != nil {
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
-	logger.Info("server successfully shutdown...")
-
+	logger.Info("server shutdown complete")
 	return nil
 }
